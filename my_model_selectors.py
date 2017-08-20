@@ -67,6 +67,13 @@ class SelectorBIC(ModelSelector):
     http://www2.imm.dtu.dk/courses/02433/doc/ch6_slides.pdf
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
+    def score(self, n_components):
+        model = self.base_model(n_components)
+        score = model.score(self.X, self.lengths)
+        n, f = self.X.shape
+        p = n_components**2 + 2 * n_components * len(self.X[0]) - 1
+        BIC = -2 * score + p * np.log(n)
+        return BIC, model
 
     def select(self):
         """ select the best model for self.this_word based on
@@ -75,9 +82,19 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        best_model = GaussianHMM()
+        best_score = float("inf")
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        for n_components in range(self.min_n_components, self.max_n_components+1):
+            try:
+                BIC, model = self.score(n_components)
+                if(BIC < best_score):
+                    best_score = BIC
+                    best_model = model
+            except:
+                pass
+
+        return best_model
 
 
 class SelectorDIC(ModelSelector):
@@ -88,21 +105,71 @@ class SelectorDIC(ModelSelector):
     http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.58.6208&rep=rep1&type=pdf
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
+    def score(self, n_components):
+        model = self.base_model(n_components)
+        score = model.score(self.X, self.lengths)
+        M, otherWordsScore = self.getLogLOtherWords(model)
+        DIC = score - (1/(M-1)) * otherWordsScore
+        return DIC, model
+
+    def getLogLOtherWords(self,model):
+        otherWordsDict = dict(self.hwords)
+        del otherWordsDict[self.this_word]
+        otherWordsList = list(otherWordsDict.keys())
+        logLOtherWords = 0
+        for word in otherWordsList:
+            X, lengths = self.hwords[word]
+            logLOtherWords += model.score(X, lengths)
+        return len(list(self.hwords)), logLOtherWords
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        best_model = GaussianHMM()
+        best_score = float("inf")
+
+        for n_components in range(self.min_n_components, self.max_n_components+1):
+            try:
+                DIC, model = self.score(n_components)
+                if(DIC < best_score):
+                    best_score = DIC
+                    best_model = model
+            except:
+                pass
+
+        return best_model
 
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
 
     '''
+    def score(self, n_components):
+        scores = []
+        n_splits=3
 
+        split_method = KFold(n_splits = min(len(self.lengths), 3))
+        for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+            self.X, self.lengths = combine_sequences(cv_train_idx, self.sequences)
+            model = self.base_model(n_components)
+            X, lengths = combine_sequences(cv_test_idx, self.sequences)
+            score = model.score(X, lengths)
+            scores.append(score)
+        return np.mean(scores), self.base_model(n_components)
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        best_model = GaussianHMM()
+        best_score = float("inf")
+
+        for n_components in range(self.min_n_components, self.max_n_components+1):
+            try:
+                score, model = self.score(n_components)
+                if(score < best_score):
+                    best_score = score
+                    best_model = model
+            except:
+                pass
+
+        return best_model
+
